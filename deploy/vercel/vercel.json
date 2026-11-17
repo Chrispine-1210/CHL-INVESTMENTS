@@ -1,0 +1,88 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "redirects": [
+    {
+      "source": "/order",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/order",
+      "permanent": false
+    },
+    {
+      "source": "/community",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/community",
+      "permanent": false
+    },
+    {
+      "source": "/portal",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/portal",
+      "permanent": false
+    },
+    {
+      "source": "/portal/:section*",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/portal/:section*",
+      "permanent": false
+    },
+    {
+      "source": "/signin-with-chatgpt",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/signin-with-chatgpt",
+      "permanent": false
+    },
+    {
+      "source": "/signout-with-chatgpt",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/signout-with-chatgpt",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/"
+    },
+    {
+      "source": "/about",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/about"
+    },
+    {
+      "source": "/journal",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/journal"
+    },
+    {
+      "source": "/journal/:path*",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/journal/:path*"
+    },
+    {
+      "source": "/privacy",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/privacy"
+    },
+    {
+      "source": "/media/:path*",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/media/:path*"
+    },
+    {
+      "source": "/_next/static/:path*",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/_next/static/:path*"
+    },
+    {
+      "source": "/favicon.svg",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/favicon.svg"
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "destination": "https://thoko-restaurant-kanengo.chrispine-ala.chatgpt.site/manifest.webmanifest"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/health.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    }
+  ]
+}
