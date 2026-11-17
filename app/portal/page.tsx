@@ -1,3 +1,4 @@
-import {Portal} from '@/components/portal';
-export const metadata={title:'Management portal',robots:{index:false,follow:false}};
-export default function PortalPage(){return <Portal/>;}
+import { PortalEntry } from '@/components/portal-entry';
+
+export const dynamic = 'force-dynamic';
+export default function PortalPage(){return <PortalEntry view="summary"/>;}

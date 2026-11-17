@@ -2,6 +2,8 @@ export const money = (value: number) => 'K' + new Intl.NumberFormat('en-MW').for
 export const location = 'Shore Rubber Building, Kwenda Road, Kanengo';
 export const phone = '+265 991 773 601';
 export const tel = '+265991773601';
+export const directions = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(location + ', Lilongwe, Malawi');
+export const malawiDate = () => new Date(Date.now()+7200000).toISOString().slice(0,10);
 
 export const menu = [
   {id:'local', name:'Local Chicken', price:9000, category:'Main meals', image:'chicken'},
@@ -40,6 +42,9 @@ export const orderTransitions: Record<string,string[]> = {
 };
 export const registers = {
   tasks:{title:'Tasks & follow-ups',singular:'Task',statuses:['Open','In progress','Done'],value:'',party:'Assigned staff email'},
+  hiring:{title:'Recruitment pipeline',singular:'Candidate',statuses:['Received','Screening','Interview','Offer','Hired','Closed'],value:'',party:'Candidate reference'},
+  shifts:{title:'Shift roster',singular:'Shift',statuses:['Scheduled','Completed','Cancelled'],value:'',party:'Assigned staff email'},
+  budgets:{title:'Monthly budgets',singular:'Budget line',statuses:['Planned','Approved','Closed'],value:'Budgeted amount (MWK)',party:'Income or expense account'},
   bills:{title:'Bills & payables',singular:'Bill',statuses:['Open','Approved','Settled','Void'],value:'Amount (MWK)',party:'Supplier'},
   tax:{title:'Tax calendar',singular:'Tax obligation',statuses:['Open','Filed','Settled','Void'],value:'Estimated amount (MWK)',party:'Authority'},
   contracts:{title:'Contracts',singular:'Contract',statuses:['Review','Active','Closed','Expired'],value:'Contract value (MWK)',party:'Counterparty'},

@@ -1,32 +1,16 @@
 'use client';
-import {useCallback,useEffect,useState,type FormEvent,type ReactNode} from 'react';
-import {api,asMessage,showDate,signIn,signOut} from '@/lib/site-client';
-import {accounts,menu,money,orderLabels,orderTransitions,registers,roleLabels,roles,type QuoteLine,type Register,type Role} from '@/lib/thoko';
-import {permits} from '@/lib/portal-access';
+import {useCallback,useEffect,useRef,useState,type FormEvent,type ReactNode} from 'react';
+import {api,asMessage,showDate,signOut} from '@/lib/site-client';
+import {accounts,malawiDate,menu,money,orderLabels,orderTransitions,registers,roleLabels,roles,type QuoteLine,type Register,type Role} from '@/lib/thoko';
+import {canRegister,navigation,permits,portalPath,seesAllTasks,visible,type View} from '@/lib/portal-access';
+import { Activity, ArrowUpRight, BookOpen, CalendarDays, ChartNoAxesColumn, ClipboardList, FileText, LayoutDashboard, ReceiptText, Settings2, ShoppingBag, ShieldCheck, TriangleAlert, Users, MessagesSquare } from 'lucide-react';
 
 type Member={role:Role;name:string;email:string};
 type Entry={id:string;title:string;party:string;due:string;status:string;amount:number;note:string;likelihood:number;impact:number;evidence:string;revision:number};
 type QueueOrder={id:string;status:string;mode:string;name?:string;phone?:string;address?:string;notes:string;lines:QuoteLine[];subtotal:number;fee:number|null;total:number|null;paid:number;created:string;revision:number};
-type View='summary'|'orders'|'ledger'|'community'|'audit'|'settings'|Register;
-const groups:[string,Array<[View,string,string]>][]=[
-  ['Restaurant',[['summary','Overview','◈'],['orders','Order queue','▤'],['tasks','Tasks & follow-ups','✓']]],
-  ['Business',[['ledger','Finance & balance sheet','▥'],['bills','Bills & payables','≡'],['tax','Tax calendar','□'],['contracts','Contracts','▧'],['risks','Risk register','△'],['decisions','Board decisions','◇']]],
-  ['Administration',[['posts','Public updates','◫'],['community','Community inbox','◎'],['audit','Audit trail','↺'],['settings','Staff & settings','⚙']]],
-];
-function visible(role:Role,view:View){
-  if(role==='founder')return true;
-  if(view==='summary'||view==='tasks')return true;
-  if(view==='orders')return permits(role,'ordersRead');
-  if(view==='ledger')return permits(role,'financeRead');
-  if(view==='community')return permits(role,'people');
-  if(view==='audit')return permits(role,'audit');
-  if(view==='decisions')return role==='board';
-  if(view==='contracts')return ['board','finance','operations'].includes(role);
-  if(view==='tax'||view==='bills')return ['board','finance'].includes(role);
-  if(view==='posts')return ['officer','operations'].includes(role);
-  if(view==='risks')return ['board','operations','officer','finance'].includes(role);
-  return false;
-}
+const icons={overview:LayoutDashboard,orders:ShoppingBag,tasks:ClipboardList,team:Users,calendar:CalendarDays,
+  ledger:ChartNoAxesColumn,bills:ReceiptText,contracts:FileText,risks:TriangleAlert,decisions:ShieldCheck,
+  posts:BookOpen,community:MessagesSquare,audit:Activity,settings:Settings2};
 function human(id:string){return '#'+id.slice(0,8).toUpperCase();}
 function countStatus(list:{status:string;count:number}[],state:string){return list.find(r=>r.status===state)?.count??0;}
 function field(form:FormData,key:string){return String(form.get(key)||'');}
@@ -34,29 +18,25 @@ function num(form:FormData,key:string){return Number(form.get(key)||0);}
 function Badge({children}:{children:ReactNode}){return <span className="status">{children}</span>;}
 function Empty({children}:{children:ReactNode}){return <p className="muted empty">{children}</p>;}
 
-export function Portal(){
-  const [member,setMember]=useState<Member|null>(null),[accessError,setAccessError]=useState(''),[view,setView]=useState<View>('summary');
-  useEffect(()=>{api<Member>('portal').then(setMember).catch(e=>setAccessError(asMessage(e)));},[]);
-  if(!member) return <main className="portal-access"><div className="paper-panel">
-    <a className="brand" href="/"><img src="/media/logo.webp" alt=""/><span>Thoko<small>RESTAURANT & TAKEAWAY</small></span></a>
-    <h1>Staff access</h1><p>{accessError||'Checking your staff access…'}</p>
-    <div className="row"><a className="button button-primary" href={signIn('/portal')} target="_top">Sign in with ChatGPT</a><a className="button button-outline" href="/">Restaurant website</a></div>
-  </div></main>;
-  const title=groups.flatMap(g=>g[1]).find(v=>v[0]===view)?.[1]||'Overview';
+export function Portal({member,view}:{member:Member;view:View}){
+  const title=navigation.flatMap(([,items])=>items).find(([key])=>key===view)?.[1]||'Overview';
   return <main className="portal-shell">
     <aside className="portal-side">
       <a className="brand" href="/"><img src="/media/logo.webp" alt=""/><span>Thoko<small>OPERATIONS PORTAL</small></span></a>
-      <nav aria-label="Management navigation">{groups.map(([name,items])=>{
+      <nav aria-label="Management navigation">{navigation.map(([name,items])=>{
         const entries=items.filter(([key])=>visible(member.role,key));
-        return entries.length>0&&<div key={name}><p>{name}</p>{entries.map(([key,label,icon])=>
-          <button aria-current={view===key?'page':undefined} key={key} onClick={()=>setView(key)}><span aria-hidden="true">{icon}</span>{label}</button>)}</div>;
+        return entries.length>0&&<div key={name}><p>{name}</p>{entries.map(([key,label,icon])=>{
+          const Icon=icons[icon as keyof typeof icons];
+          return <a aria-current={view===key?'page':undefined} key={key} href={portalPath(key)}><Icon size={17} aria-hidden="true"/>{label}</a>;
+        })}</div>;
       })}</nav>
     </aside>
-    <section className="portal-main"><div className="portal-top"><div><p className="kicker">THOKO MANAGEMENT</p><h1>{title}</h1></div>
+    <section className="portal-main"><div className="portal-top"><div><p className="kicker">Thoko management</p><h1>{title}</h1></div>
       <div className="portal-user"><b>{member.name}</b><small>{roleLabels[member.role]}</small><a className="text-link" href={signOut('/')} target="_top">Sign out</a></div></div>
-      {view==='summary'?<Summary setView={setView} role={member.role}/>:
+      {view==='summary'?<Summary role={member.role}/>:
       view==='orders'?<OrderQueue role={member.role}/>:
       view==='ledger'?<Ledger role={member.role}/>:
+      view==='team'?<Team role={member.role}/>:
       view==='settings'?<Settings/>:
       view==='audit'?<Audit/>:
       view==='community'?<CommunityInbox/>:
@@ -66,12 +46,19 @@ export function Portal(){
 }
 
 function useResource<T>(path:string){
-  const [data,setData]=useState<T|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const [result,setResult]=useState<{path:string;value:T}|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const requestVersion=useRef(0);
   const load=useCallback(async()=>{
+    const version=++requestVersion.current;
     setError('');
-    try{setData(await api<T>(path));}catch(e){setError(asMessage(e));}
+    try{
+      const value=await api<T>(path);
+      if(version===requestVersion.current)setResult({path,value});
+    }catch(e){
+      if(version===requestVersion.current)setError(asMessage(e));
+    }
   },[path]);
-  useEffect(()=>{void load();},[load]);
+  useEffect(()=>{void load();return()=>{requestVersion.current++;};},[load]);
   async function save(endpoint:string,payload:unknown){
     if(busy)return false;
     setBusy(true);setError('');
@@ -79,61 +66,107 @@ function useResource<T>(path:string){
     catch(e){setError(asMessage(e));return false;}
     finally{setBusy(false);}
   }
-  return {data,error,busy,load,save,setError};
+  return {data:result?.path===path?result.value:null,error,busy,load,save,setError};
 }
 function Warning({message}:{message:string}){return message?<p className="message error" role="alert">{message}</p>:null;}
-function Summary({setView,role}:{setView:(view:View)=>void;role:Role}){
+function Summary({role}:{role:Role}){
   type Counts={status:string;count:number};
-  const {data,error}=useResource<{tasks:Counts[];orders:Counts[];risks:{id:string;title:string;score:number;status:string}[]}>('portal/summary');
-  return <><Warning message={error}/><div className="metrics">
-    <article><span>Open tasks</span><b>{data?countStatus(data.tasks,'Open'):'—'}</b><button onClick={()=>setView('tasks')}>View tasks ›</button></article>
-    <article><span>Tasks in progress</span><b>{data?countStatus(data.tasks,'In progress'):'—'}</b><button onClick={()=>setView('tasks')}>Review follow-ups ›</button></article>
-    {(permits(role,'ordersRead')||role==='board')&&<article><span>Order requests</span><b>{data?countStatus(data.orders,'requested'):'—'}</b>{permits(role,'ordersRead')&&<button onClick={()=>setView('orders')}>Open queue ›</button>}</article>}
-  </div>{visible(role,'risks')&&<section className="paper-panel"><div className="section-head"><h2>Priority risks</h2><button className="button button-outline" onClick={()=>setView('risks')}>Open register</button></div>
+  const {data,error}=useResource<{tasks:Counts[];due:{today:number;overdue:number};orders:Counts[];risks:{id:string;title:string;score:number;status:string}[]}>('portal/summary');
+  const metrics=[
+    {label:'Open tasks',value:data?countStatus(data.tasks,'Open'):undefined,href:'/portal/tasks'},
+    {label:'In progress',value:data?countStatus(data.tasks,'In progress'):undefined,href:'/portal/tasks'},
+    {label:'Due today',value:data?.due?.today,href:'/portal/tasks'},
+    {label:'Overdue',value:data?.due?.overdue,href:'/portal/tasks'},
+  ];
+  return <><Warning message={error}/><section className="portal-brief"><p className="kicker">{new Intl.DateTimeFormat('en-MW',{dateStyle:'full',timeZone:'Africa/Blantyre'}).format(new Date())}</p>
+    <h2>{seesAllTasks(role)?'Restaurant at a glance':'Your work at Thoko'}</h2><p>{seesAllTasks(role)?'Review open team work and items that need attention.':'Review the tasks and shifts assigned to you.'}</p></section>
+    <div className="metrics overview-metrics">{metrics.map(item=><article key={item.label}><span>{item.label}</span><b>{item.value??'—'}</b><a href={item.href} aria-label={item.label+' · Go to tasks'}><ArrowUpRight size={17} aria-hidden="true"/></a></article>)}</div>
+    {(permits(role,'ordersRead')||role==='board')&&<section className="paper-panel"><div className="section-head"><h2>Order requests</h2>{permits(role,'ordersRead')&&<a className="button button-outline" href="/portal/orders">Open queue</a>}</div><p className="muted">{data?countStatus(data.orders,'requested')+' awaiting restaurant action':'Loading requests…'}</p></section>}
+    <div className="row portal-shortcuts">
+      <a className="button button-outline" href="/portal/shifts">Shift roster</a>
+      {visible(role,'ledger')&&<a className="button button-outline" href="/portal/ledger">Financial statements</a>}
+      {visible(role,'team')&&<a className="button button-outline" href="/portal/team">Team directory</a>}
+    </div>
+    {visible(role,'risks')&&<section className="paper-panel"><div className="section-head"><h2>Priority risks</h2><a className="button button-outline" href="/portal/risks">Open register</a></div>
     {!data?.risks.length?<Empty>{data?'No open risks recorded.':'Loading risks…'}</Empty>:data.risks.map(r=><div className="list-row" key={r.id}><b>{r.title}</b><Badge>{r.status} · {r.score}/25</Badge></div>)}
   </section>}</>;
 }
 
+function Team({role}:{role:Role}){
+  const {data,error,load}=useResource<{staff:{email:string;role:Role;created:string}[]}>('portal/team');
+  return <><Warning message={error}/><section className="paper-panel">
+    <div className="section-head"><h2>Active staff accounts</h2><div className="row">
+      <a className="button button-outline" href="/portal/shifts">Shift roster</a>
+      <button className="button button-outline" onClick={load}>Refresh</button>
+      {permits(role,'manage')&&<a className="button button-primary" href="/portal/settings">Manage access</a>}
+    </div></div>
+    {!data?.staff.length?<Empty>{data?'No active staff accounts have been added.':'Loading staff accounts…'}</Empty>:
+      <div className="team-directory">{data.staff.map(member=><article key={member.email}><div aria-hidden="true">{member.email.slice(0,2).toUpperCase()}</div><p><b>{member.email}</b><span>{roleLabels[member.role]}</span></p></article>)}</div>}
+  </section></>;
+}
+
 function RegisterView({kind,member}:{kind:Register;member:Member}){
   const meta=registers[kind],path='portal/registers/'+kind;
-  const {data,error,busy,save,load}=useResource<{rows:Entry[]}>(path);
   const [editing,setEditing]=useState<Entry|'new'|null>(null);
-  const [filter,setFilter]=useState('');
-  const canEdit=kind==='tasks'?['founder','operations','officer'].includes(member.role):
-    member.role!=='board'||kind==='decisions'||kind==='risks';
+  const [filter,setFilter]=useState(''),[search,setSearch]=useState(''),[dueFilter,setDueFilter]=useState('');
+  const [budgetMonth,setBudgetMonth]=useState(malawiDate().slice(0,7));
+  const {data,error,busy,save,load}=useResource<{rows:Entry[]}>(path+(kind==='budgets'&&budgetMonth?'?month='+budgetMonth:''));
+  const today=malawiDate();
+  const assigned=kind==='tasks'||kind==='shifts';
+  const budgetAccounts=accounts.filter(([,,type])=>type==='income'||type==='expense');
+  const canEdit=canRegister(member.role,kind,true);
   const item=editing&&editing!=='new'?editing:undefined;
-  const filtered=data?.rows.filter(r=>!filter||r.status===filter)||[];
+  const filtered=data?.rows.filter(row=>{
+    if(filter&&row.status!==filter)return false;
+    if(search&&![row.title,row.party,row.note].some(value=>value.toLowerCase().includes(search.trim().toLowerCase())))return false;
+    if(kind==='budgets'&&budgetMonth&&row.due.slice(0,7)!==budgetMonth)return false;
+    if(dueFilter==='today')return row.due===today&&row.status!=='Done';
+    if(dueFilter==='overdue')return !!row.due&&row.due<today&&row.status!=='Done';
+    return true;
+  })||[];
   async function submit(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
     const form=new FormData(e.currentTarget);
+    const due=field(form,'due');
     if(await save(path+(item?'/'+item.id:''),{
-      title:field(form,'title'),party:field(form,'party'),due:field(form,'due'),status:field(form,'status'),
+      title:field(form,'title'),party:field(form,'party'),due:kind==='budgets'?due+'-01':due,status:field(form,'status'),
       amount:num(form,'amount'),note:field(form,'note'),evidence:field(form,'evidence'),
       likelihood:num(form,'likelihood')||1,impact:num(form,'impact')||1,revision:item?.revision,
-    }))setEditing(null);
+    })){
+      if(kind==='budgets')setBudgetMonth(due);
+      setEditing(null);
+    }
   }
   return <><Warning message={error}/><section className="paper-panel">
     <div className="section-head"><h2>{meta.title}</h2><div className="row"><select aria-label="Filter status" value={filter} onChange={e=>setFilter(e.target.value)}><option value="">All statuses</option>{meta.statuses.map(s=><option key={s}>{s}</option>)}</select>
       {canEdit&&<button className="button button-primary" onClick={()=>setEditing('new')}>New {meta.singular.toLowerCase()}</button>}
       <button className="button button-outline" onClick={load}>Refresh</button></div></div>
+    {kind==='hiring'&&<p className="muted small">Use an internal candidate reference. Record the next action and due date. <a className="text-link" href="/portal/community">Review community interest</a></p>}
+    {kind==='posts'&&<p className="muted small">The first paragraph is shown in the journal listing. Published updates appear on the website immediately.</p>}
+    <div className="row work-filters"><label>Search<input type="search" value={search} placeholder="Title, owner or details" onChange={e=>setSearch(e.target.value)}/></label>
+      {kind==='tasks'&&<label>Due date<select value={dueFilter} onChange={e=>setDueFilter(e.target.value)}><option value="">All dates</option><option value="today">Due today</option><option value="overdue">Overdue</option></select></label>}
+      {kind==='budgets'&&<label>Budget month<input type="month" value={budgetMonth} onChange={e=>setBudgetMonth(e.target.value)}/></label>}
+    </div>
+    {kind==='budgets'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(budgetMonth)&&data&&<BudgetActuals month={budgetMonth} rows={data.rows}/> }
     {editing&&<form className="stack portal-form" key={item?.id||'new'} onSubmit={submit}>
       <h3>{item?'Edit':'New'} {meta.singular.toLowerCase()}</h3>
       <div className="fields"><label>Title<input name="title" defaultValue={item?.title} required minLength={3} maxLength={150}/></label>
-      <label>{meta.party}<input name="party" type={kind==='tasks'?'email':'text'} required={kind==='tasks'} defaultValue={item?.party} maxLength={160}/></label>
-      <label>Due date<input name="due" type="date" defaultValue={item?.due}/></label>
+      {kind==='budgets'?<label>{meta.party}<select name="party" required defaultValue={item?.party||''}><option value="" disabled>Choose an account</option>{budgetAccounts.map(([code,name])=><option key={code} value={code}>{code} · {name}</option>)}</select></label>:
+      <label>{meta.party}<input name="party" type={assigned?'email':'text'} required={assigned||kind==='hiring'} defaultValue={item?.party} maxLength={160}/></label>}
+      <label>{kind==='budgets'?'Budget month':kind==='shifts'?'Shift date':'Due date'}<input name="due" type={kind==='budgets'?'month':'date'} required={kind==='budgets'||kind==='shifts'} defaultValue={kind==='budgets'?item?.due.slice(0,7)||budgetMonth:item?.due}/></label>
       <label>Status<select name="status" defaultValue={item?.status}>{meta.statuses.map(s=><option key={s}>{s}</option>)}</select></label>
       {meta.value&&<label>{meta.value}<input name="amount" type="number" min={0} max={1000000000} defaultValue={item?.amount||0}/></label>}
       {kind==='risks'&&<><label>Likelihood (1–5)<input name="likelihood" type="number" min={1} max={5} defaultValue={item?.likelihood||1} required/></label><label>Impact (1–5)<input name="impact" type="number" min={1} max={5} defaultValue={item?.impact||1} required/></label></>}
       </div>
-      <label>{kind==='posts'?'Public update text':kind==='risks'?'Mitigation and next steps':'Details and next steps'}<textarea name="note" maxLength={1800} defaultValue={item?.note}/></label>
+      <label>{kind==='posts'?'Public article text':kind==='shifts'?'Shift hours and duties':kind==='risks'?'Mitigation and next steps':'Details and next steps'}<textarea name="note" maxLength={1800} defaultValue={item?.note}/></label>
       {kind!=='posts'&&<label>Evidence or settlement reference<input name="evidence" maxLength={350} defaultValue={item?.evidence}/></label>}
       <div className="row"><button className="button button-primary" disabled={busy}>{busy?'Saving…':'Save'}</button><button type="button" className="button button-outline" onClick={()=>setEditing(null)}>Cancel</button></div>
     </form>}
     {!filtered.length?<Empty>{data?'No records match this view.':'Loading records…'}</Empty>:
       <div className="table-scroll"><table><thead><tr><th>Record</th><th>Owner / party</th><th>Due</th><th>Status</th>{(meta.value||kind==='risks')&&<th>{kind==='risks'?'Risk score':'Amount'}</th>}<th>Action</th></tr></thead><tbody>
-      {filtered.map(r=><tr key={r.id}><td><strong>{r.title}</strong>{r.note&&<p className="small muted preline">{r.note}</p>}{r.evidence&&<p className="small">Ref {r.evidence}</p>}</td><td>{r.party||'—'}</td><td>{r.due||'—'}</td><td><Badge>{r.status}</Badge></td>
+      {filtered.map(r=><tr key={r.id}><td><strong>{r.title}</strong>{r.note&&<p className="small muted preline">{r.note}</p>}{r.evidence&&<p className="small">Ref {r.evidence}</p>}</td><td>{kind==='budgets'?budgetAccounts.find(([code])=>code===r.party)?.[1]||r.party:r.party||'—'}</td><td>{r.due||'—'}{kind==='tasks'&&r.due&&r.due<today&&r.status!=='Done'&&<p className="overdue-label">Overdue</p>}</td><td><Badge>{r.status}</Badge></td>
         {meta.value&&<td>{money(r.amount)}</td>}{kind==='risks'&&<td>{r.likelihood*r.impact}/25</td>}
-        <td>{canEdit?<button className="text-link" onClick={()=>setEditing(r)}>Edit</button>:kind==='tasks'&&r.party===member.email.toLowerCase()?
+        <td>{kind==='posts'&&r.status==='Published'&&<a className="text-link journal-live" href={'/journal/'+r.id}>View live</a>}{canEdit?<button className="text-link" onClick={()=>setEditing(r)}>Edit</button>:kind==='tasks'&&r.party===member.email.toLowerCase()?
           <select aria-label={'Status for '+r.title} value={r.status} disabled={busy} onChange={e=>save(path+'/'+r.id+'/status',{status:e.target.value,revision:r.revision})}>{meta.statuses.map(s=><option key={s}>{s}</option>)}</select>:'—'}</td></tr>)}
       </tbody></table></div>}
   </section></>;
@@ -198,12 +231,31 @@ function OrderQueue({role}:{role:Role}){
   </section>}</>;
 }
 
+function BudgetActuals({month,rows}:{month:string;rows:Entry[]}){
+  const last=new Date(month+'-01T00:00:00Z');
+  last.setUTCMonth(last.getUTCMonth()+1,0);
+  const lastDay=last.toISOString().slice(0,10);
+  const {data,error}=useResource<{accounts:{code:string;type:string;period:number}[]}>('portal/ledger?from='+month+'-01&asOf='+lastDay);
+  const lines=rows.filter(row=>row.due.slice(0,7)===month&&row.status!=='Planned');
+  const totals=['income','expense'].map(type=>{
+    const budget=lines.filter(line=>accounts.some(([code,,accountType])=>code===line.party&&accountType===type))
+      .reduce((sum,line)=>sum+line.amount,0);
+    const actual=data?.accounts.filter(account=>account.type===type).reduce((sum,account)=>sum+account.period,0);
+    return {type,budget,actual};
+  });
+  return <div className="budget-comparison"><Warning message={error}/><p className="muted small">Approved and closed budget lines compared with posted journals for the selected month.</p>
+    <div className="table-scroll"><table><thead><tr><th>Category</th><th>Budget</th><th>Actual</th><th>Actual minus budget</th></tr></thead><tbody>
+      {totals.map(({type,budget,actual})=><tr key={type}><td>{type==='income'?'Income':'Expenses'}</td><td>{money(budget)}</td><td>{actual===undefined?'—':money(actual)}</td><td>{actual===undefined?'—':money(actual-budget)}</td></tr>)}
+    </tbody></table></div></div>;
+}
+
 function Ledger({role}:{role:Role}){
-  const [date,setDate]=useState(''),[editing,setEditing]=useState(false),[count,setCount]=useState(2);
+  const [date,setDate]=useState(''),[from,setFrom]=useState(''),[editing,setEditing]=useState(false),[count,setCount]=useState(2);
   const {data,error,busy,save,load}=useResource<{
-    date:string;assets:number;liabilities:number;equity:number;earnings:number;income:number;expense:number;variance:number;
+    date:string;from:string;assets:number;liabilities:number;equity:number;earnings:number;income:number;expense:number;variance:number;
+    period:{income:number;expense:number;result:number;cashBalance:number;cashMovement:number};
     accounts:{code:string;name:string;type:string;balance:number}[];journals:{id:string;reference:string;memo:string;date:string;amount:number}[];
-  }>('portal/ledger'+(date?'?asOf='+encodeURIComponent(date):''));
+  }>('portal/ledger?'+new URLSearchParams({...date&&{asOf:date},...from&&{from}}));
   async function post(e:FormEvent<HTMLFormElement>){
     e.preventDefault();const form=new FormData(e.currentTarget);
     const lines=Array.from({length:count},(_,i)=>({account:field(form,'account'+i),side:field(form,'side'+i),amount:num(form,'amount'+i)}));
@@ -211,8 +263,13 @@ function Ledger({role}:{role:Role}){
       setEditing(false);setCount(2);
     }
   }
-  return <><Warning message={error}/><div className="row report-date"><label>Balance sheet as of<input type="date" value={date||data?.date||''} onChange={e=>setDate(e.target.value)}/></label><button className="button button-outline" onClick={load}>Refresh</button></div>
+  return <><Warning message={error}/><div className="row report-date"><label>Period start<input type="date" value={from||data?.from||''} onChange={e=>setFrom(e.target.value)}/></label><label>Report date<input type="date" value={date||data?.date||''} onChange={e=>setDate(e.target.value)}/></label><button className="button button-outline" onClick={load}>Refresh</button></div>
     <div className="metrics">{[['Assets',data?.assets],['Liabilities',data?.liabilities],['Equity incl. earnings',data?.equity]].map(([label,value])=><article key={String(label)}><span>{label}</span><b>{typeof value==='number'?money(value):'—'}</b></article>)}</div>
+    <section className="paper-panel"><div className="section-head"><h2>Period performance</h2><a className="text-link" href="/portal/budgets">Monthly budgets</a></div>
+      <div className="metrics period-metrics">{[['Income',data?.period.income],['Expenses',data?.period.expense],['Operating result',data?.period.result],['Cash & equivalents',data?.period.cashBalance],['Net cash account movement',data?.period.cashMovement]].map(([label,value])=>
+        <article key={String(label)}><span>{label}</span><b>{typeof value==='number'?money(value):'—'}</b></article>)}</div>
+      <p className="muted small">Income and expenses use journals posted within the selected period. Cash combines the cash, bank and mobile money ledger accounts.</p>
+    </section>
     <section className="paper-panel">
       <div className="section-head"><h2>General ledger</h2>{permits(role,'financeWrite')&&<button className="button button-primary" onClick={()=>setEditing(!editing)}>{editing?'Close journal form':'Post journal'}</button>}</div>
       <p className="muted small">Balances use posted journals through the report date. Enter opening balances and post cleared payments using their source references. Tax estimates and payable register records require their own ledger entries.</p>

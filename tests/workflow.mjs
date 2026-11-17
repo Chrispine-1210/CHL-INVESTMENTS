@@ -18,13 +18,18 @@ const identities={
   other:{id:'other-local',email:'other@example.test'},
   staff:{id:'staff-local',email:'staff@example.test'},
   board:{id:'board-local',email:'board@example.test'},
+  officer:{id:'officer-local',email:'officer@example.test'},
 };
-async function api(path,{who,body,status=200}={}){
+function authHeaders(who){
   const headers={};
   if(who){
     headers['oai-authenticated-user-id']=identities[who].id;
     headers['oai-authenticated-user-email']=identities[who].email;
   }
+  return headers;
+}
+async function api(path,{who,body,status=200}={}){
+  const headers=authHeaders(who);
   if(body!==undefined){
     headers.origin='http://thoko.test';
     headers['content-type']='application/json';
@@ -33,6 +38,14 @@ async function api(path,{who,body,status=200}={}){
   const raw=await r.text();
   assert.equal(r.status,status,`HTTP ${path}: ${raw.slice(0,600)}`);
   return JSON.parse(raw);
+}
+async function page(path,{who,status=200,contains,excludes,privatePage=false}={}){
+  const r=await mf.dispatchFetch('http://thoko.test'+path,{headers:authHeaders(who),redirect:'manual'});
+  const html=await r.text();
+  assert.equal(r.status,status,path);
+  if(contains) assert.ok(html.includes(contains),path+' missing '+contains);
+  if(excludes) assert.ok(!html.includes(excludes),path+' exposed '+excludes);
+  if(privatePage) assert.equal(r.headers.get('cache-control'),'private, no-store');
 }
 const order=(mode='pickup')=>({requestKey:crypto.randomUUID(),mode,name:'Test Buyer',phone:'+265 991 000 000',
   address:mode==='delivery'?'Test delivery area near landmark':'',notes:'Test only',
@@ -47,6 +60,24 @@ try{
   await api('portal/settings',{who:'owner',body:{intake:true,delivery:true,community:true,disabled:[]}});
   await setStaff('staff','staff');
   await setStaff('board','board');
+  await setStaff('officer','officer');
+
+  await page('/',{contains:'Close to home.'});
+  await page('/about',{contains:'Dorothy Chakhala'});
+  await page('/portal/ledger',{contains:'Staff sign-in',excludes:'Financial statements',privatePage:true});
+  await page('/portal/ledger',{who:'buyer',contains:'Staff access required',excludes:'Financial statements',privatePage:true});
+  await page('/portal/ledger',{who:'staff',contains:'Restricted workspace',excludes:'Financial statements',privatePage:true});
+  await page('/portal/ledger',{who:'board',contains:'Financial statements',privatePage:true});
+  await page('/portal/team',{who:'owner',contains:'Active staff accounts',privatePage:true});
+  await api('portal/team',{who:'staff',status:403});
+  assert.equal((await api('portal/team',{who:'owner'})).staff.length,4);
+
+  const candidate={title:'Kitchen assistant application',party:'HR-2026-001',status:'Screening',due:'2026-11-20'};
+  await api('portal/registers/hiring',{who:'officer',body:candidate,status:201});
+  await api('portal/registers/hiring',{who:'staff',status:403});
+  await api('portal/registers/hiring',{who:'board',status:403});
+  await page('/portal/hiring',{who:'officer',contains:'Recruitment pipeline',privatePage:true});
+  await api('portal/registers/hiring',{who:'officer',body:{...candidate,party:''},status:400});
 
   const pickup=order();
   const created=(await api('orders',{who:'buyer',body:pickup,status:201})).order;
@@ -83,6 +114,12 @@ try{
   await api('portal/registers/tasks/'+task.id+'/status',{who:'staff',body:{status:'Done',revision:1}});
   assert.equal((await api('portal/registers/tasks',{who:'staff'})).rows[0].status,'Done');
   await api('portal/registers/tax',{who:'staff',status:403});
+  const shift={title:'Dinner service',party:'staff@example.test',status:'Scheduled',due:'2026-11-17',note:'15:00–20:00'};
+  await api('portal/registers/shifts',{who:'owner',body:shift,status:201});
+  await api('portal/registers/shifts',{who:'owner',body:{...shift,party:'buyer@example.test'},status:400});
+  await api('portal/registers/shifts',{who:'staff',body:shift,status:403});
+  assert.equal((await api('portal/registers/shifts',{who:'staff'})).rows.length,1);
+  assert.equal((await api('portal/registers/shifts',{who:'board'})).rows.length,0);
 
   const entry={date:'2026-11-12',reference:'OPENING-1',memo:'Test opening cash',lines:[
     {account:'1000',side:'debit',amount:10000},{account:'3000',side:'credit',amount:10000}]};
@@ -93,13 +130,36 @@ try{
   const books=await api('portal/ledger?asOf=2026-11-12',{who:'board'});
   assert.equal(books.assets,10000);assert.equal(books.equity,10000);assert.equal(books.variance,0);
 
-  await api('portal/registers/posts',{who:'owner',body:{title:'Test kitchen update',status:'Published',note:'Example update text.'},status:201});
-  assert.equal((await api('public')).posts.length,1);
+  const sale={date:'2026-11-13',reference:'SALE-1',memo:'Test food sale',lines:[
+    {account:'1020',side:'debit',amount:9000},{account:'4000',side:'credit',amount:9000}]};
+  await api('portal/ledger',{who:'owner',body:sale,status:201});
+  const novemberSale=await api('portal/ledger?asOf=2026-11-30&from=2026-11-13',{who:'board'});
+  assert.deepEqual(novemberSale.period,{income:9000,expense:0,result:9000,cashBalance:19000,cashMovement:9000});
+  await api('portal/ledger?asOf=2026-11-12&from=2026-11-13',{who:'board',status:400});
+
+  const budget={title:'November sales',party:'4000',due:'2026-11-01',status:'Approved',amount:12000};
+  await api('portal/registers/budgets',{who:'owner',body:budget,status:201});
+  await api('portal/registers/budgets',{who:'owner',body:budget,status:409});
+  await api('portal/registers/budgets',{who:'owner',body:{...budget,party:'1000'},status:400});
+  await api('portal/registers/budgets',{who:'board',body:{...budget,party:'5000'},status:403});
+  assert.equal((await api('portal/registers/budgets?month=2026-11',{who:'board'})).rows.length,1);
+  assert.equal((await api('portal/registers/budgets?month=2026-10',{who:'board'})).rows.length,0);
+  await api('portal/registers/budgets?month=2026-13',{who:'board',status:400});
+
+  const draft=await api('portal/registers/posts',{who:'owner',body:{title:'Confidential article text',status:'Draft',note:'Keep this article private.'},status:201});
+  const post=await api('portal/registers/posts',{who:'owner',body:{title:'Test kitchen update',status:'Published',note:'Example update text.'},status:201});
+  await page('/journal',{contains:'Test kitchen update',excludes:'Confidential article text'});
+  await page('/journal/chicken-on-the-menu',{contains:'Three ways to order chicken'});
+  await page('/journal/'+post.id,{contains:'Example update text.'});
+  await page('/journal/'+draft.id,{status:404,excludes:'Confidential article text'});
+  await api('portal/registers/posts/'+post.id,{who:'owner',body:{title:'Test kitchen update',status:'Archived',note:'Example update text.',revision:1}});
+  await page('/journal/'+post.id,{status:404,excludes:'Example update text.'});
+  assert.equal((await api('public')).posts.length,0);
   await api('community',{who:'buyer',body:{kind:'careers',consent:true,note:'Example interest'}});
   assert.equal((await api('portal/community',{who:'owner'})).interests.length,1);
   await api('community',{who:'buyer',body:{kind:'careers',consent:false}});
   assert.equal((await api('portal/community',{who:'owner'})).interests.length,0);
   const events=(await api('portal/audit',{who:'owner'})).events;
   assert.equal(events.filter(e=>e.action==='order.status'&&e.target===created.id).length,4);
-  console.log('PASS: durable pickup and delivery, server prices, retry deduplication, customer isolation, quote consent, split receipts, role controls, tasks, balanced ledger, public updates and interest withdrawal.');
+  console.log('PASS: durable pickup and delivery, server prices, retry deduplication, customer isolation, quote consent, split receipts, server-rendered role controls, assigned tasks and shifts, private hiring, balanced period reports, budgets, journal publication and interest withdrawal.');
 } finally { await mf.dispose(); }

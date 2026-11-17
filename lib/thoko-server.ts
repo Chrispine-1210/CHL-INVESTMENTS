@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { z } from 'zod';
 import { getChatGPTUser, type ChatGPTUser } from '@/app/chatgpt-auth';
-import { accounts, addonIds, menu, orderTransitions, priceOrder, registers, roles, type Register, type Role } from './thoko';
-import { permits } from './portal-access';
+import { accounts, addonIds, malawiDate, menu, orderTransitions, priceOrder, registers, roles, type Register, type Role } from './thoko';
+import { canRegister, managesWork, permits, seesAllTasks, seesTeam } from './portal-access';
 
 class ApiError extends Error {
   constructor(public status:number, message:string) { super(message); }
@@ -52,7 +52,7 @@ async function input<T extends z.ZodType>(request:Request,schema:T):Promise<z.in
   return result.data;
 }
 
-async function roleFor(user:ChatGPTUser|null):Promise<Role|null> {
+export async function roleFor(user:ChatGPTUser|null):Promise<Role|null> {
   if (!user) return null;
   const address=user.email.trim().toLowerCase();
   if (env.THOKO_OWNER_EMAIL?.trim().toLowerCase()===address) return 'founder';
@@ -170,16 +170,6 @@ async function receipt(request:Request,user:ChatGPTUser,role:Role|null,orderId:s
 }
 
 const validRegister=(key:string):key is Register=>Object.hasOwn(registers,key);
-function canRegister(role:Role|null,key:Register,write=false) {
-  if (role==='founder') return true;
-  if (!role) return false;
-  if (key==='tasks') return true;
-  if (['bills','tax'].includes(key)) return role==='finance'||(role==='board'&&!write);
-  if (key==='posts') return role==='officer'||role==='operations';
-  if (key==='decisions') return role==='board';
-  if (key==='contracts') return role==='operations'||role==='finance'||(role==='board'&&!write);
-  return ['board','operations','officer','finance'].includes(role);
-}
 const recordSchema=z.object({
   title:memo(150).min(3),party:memo(160).default(''),due:z.union([calendarDate,z.literal('')]).default(''),
   status:memo(26),amount:kwacha.default(0),note:memo(1800).default(''),evidence:memo(350).default(''),
@@ -187,27 +177,40 @@ const recordSchema=z.object({
   revision:z.number().int().positive().optional(),
 });
 type RecordRow={id:string;kind:string;party:string;status:string;revision:number};
-const taskFull=(role:Role|null)=>role==='founder'||role==='operations'||role==='officer';
 async function recordWrite(request:Request,user:ChatGPTUser,role:Role|null,kind:Register,recordId?:string) {
   ensure(canRegister(role,kind,true),403,'This register is outside your role.');
   const value=await input(request,recordSchema);
   ensure((registers[kind].statuses as readonly string[]).includes(value.status),400,'Choose a valid status.');
-  if (kind==='tasks'&&!taskFull(role)) throw new ApiError(403,'Use the task status action for your assigned work.');
-  if (kind==='tasks') ensure(email.safeParse(value.party).success,400,'Assign the task to a staff email address.');
+  const assigned=kind==='tasks'||kind==='shifts';
+  if (assigned) ensure(email.safeParse(value.party).success,400,'Enter a staff email address.');
+  if (kind==='hiring') ensure(value.party,400,'Enter a candidate reference.');
+  if (kind==='shifts') {
+    ensure(value.due,400,'Choose a shift date.');
+    const address=value.party.toLowerCase();
+    ensure(env.THOKO_OWNER_EMAIL?.trim().toLowerCase()===address||await one('SELECT email FROM staff WHERE email=? AND active=1',address),400,'Assign the shift to an active Thoko account.');
+  }
+  if (kind==='budgets') {
+    ensure(accounts.some(([code,,type])=>code===value.party&&(type==='income'||type==='expense')),400,'Choose an income or expense account.');
+    ensure(value.due.endsWith('-01'),400,'Use the first day of the budget month.');
+  }
   if (kind==='posts'&&value.status==='Published') ensure(value.note.length>=12,400,'Enter public update text before publishing.');
   if (['bills','tax'].includes(kind)&&value.status==='Settled') ensure(value.evidence.length>=4,400,'Record a cleared settlement reference.');
   if (kind==='decisions'&&value.status!=='Proposed') ensure(value.evidence.length>=4,400,'Record a minute or approval reference.');
-  const party=kind==='tasks'?value.party.toLowerCase():value.party;
+  const party=assigned?value.party.toLowerCase():value.party;
   const values:Param[]=[value.title,party,value.due,value.status,value.amount,value.note,value.likelihood,value.impact,value.evidence];
   if (!recordId) {
     const newId=id();
     await write(user,statement(`INSERT INTO records(id,kind,title,party,due,status,amount,note,likelihood,impact,evidence,created,updated,revision)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,newId,kind,...values,now(),now()),kind+'.create',newId,value.status);
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,1
+      WHERE ?<>'budgets' OR NOT EXISTS(SELECT 1 FROM records WHERE kind='budgets' AND party=? AND due=?)`,
+      newId,kind,...values,now(),now(),kind,party,value.due),kind+'.create',newId,value.status);
     return response({id:newId},201);
   }
   ensure(value.revision,400,'Refresh the record before saving changes.');
   await write(user,statement(`UPDATE records SET title=?,party=?,due=?,status=?,amount=?,note=?,likelihood=?,impact=?,evidence=?,updated=?,revision=revision+1
-      WHERE id=? AND kind=? AND revision=?`,...values,now(),recordId,kind,value.revision),kind+'.update',recordId,value.status);
+      WHERE id=? AND kind=? AND revision=? AND (?<>'budgets' OR NOT EXISTS(
+        SELECT 1 FROM records existing WHERE existing.kind='budgets' AND existing.party=? AND existing.due=? AND existing.id<>?
+      ))`,...values,now(),recordId,kind,value.revision,kind,party,value.due,recordId),kind+'.update',recordId,value.status);
   return response({ok:true});
 }
 
@@ -228,22 +231,38 @@ async function ledgerWrite(request:Request,user:ChatGPTUser) {
   return response({id:journalId},201);
 }
 async function ledgerRead(request:Request) {
-  const today=new Date(Date.now()+7200000).toISOString().slice(0,10);
-  const date=calendarDate.safeParse(new URL(request.url).searchParams.get('asOf')??today);
+  const query = new URL(request.url).searchParams;
+  const date=calendarDate.safeParse(query.get('asOf')??malawiDate());
   ensure(date.success,400,'Enter a valid report date.');
-  const rows=await many<{account:string;balance:number}>(`SELECT p.account,SUM(CASE WHEN p.side='debit' THEN p.amount ELSE -p.amount END) AS balance
-     FROM postings p JOIN journals j ON j.id=p.journal_id WHERE j.date<=? GROUP BY p.account`,date.data);
+  const from=calendarDate.safeParse(query.get('from')??date.data.slice(0,7)+'-01');
+  ensure(from.success&&from.data<=date.data,400,'The period must begin on or before the report date.');
+  const rows=await many<{account:string;balance:number;period:number}>(`SELECT p.account,
+      SUM(CASE WHEN p.side='debit' THEN p.amount ELSE -p.amount END) AS balance,
+      SUM(CASE WHEN j.date<? THEN 0 WHEN p.side='debit' THEN p.amount ELSE -p.amount END) AS period
+      FROM postings p JOIN journals j ON j.id=p.journal_id WHERE j.date<=? GROUP BY p.account`,from.data,date.data);
   const list=accounts.map(([code,name,type])=>{
-    const debit=rows.find(r=>r.account===code)?.balance??0;
-    return {code,name,type,balance:['asset','expense'].includes(type)?debit:-debit};
+    const row=rows.find(r=>r.account===code);
+    const sign=type==='asset'||type==='expense'?1:-1;
+    return {code,name,type,balance:(row?.balance??0)*sign,period:(row?.period??0)*sign};
   });
   const sum=(type:string)=>list.filter(a=>a.type===type).reduce((n,a)=>n+a.balance,0);
   const assets=sum('asset'),liabilities=sum('liability'),earnings=sum('income')-sum('expense'),equity=sum('equity')+earnings;
   const journals=await many(`SELECT j.id,j.reference,j.date,j.memo,SUM(CASE WHEN p.side='debit' THEN p.amount ELSE 0 END) AS amount
       FROM journals j JOIN postings p ON p.journal_id=j.id WHERE j.date<=? GROUP BY j.id ORDER BY j.date DESC,j.created DESC LIMIT 100`,date.data);
-  return response({date:date.data,assets,liabilities,equity,earnings,income:sum('income'),expense:sum('expense'),
+  const periodSum=(type:string)=>list.filter(account=>account.type===type).reduce((total,account)=>total+account.period,0);
+  const cash=list.filter(account=>['1000','1010','1020'].includes(account.code));
+  const cashBalance=cash.reduce((total,account)=>total+account.balance,0);
+  const cashMovement=cash.reduce((total,account)=>total+account.period,0);
+  const income=periodSum('income'),expense=periodSum('expense');
+  return response({date:date.data,from:from.data,assets,liabilities,equity,earnings,income:sum('income'),expense:sum('expense'),
+    period:{income,expense,result:income-expense,cashBalance,cashMovement},
     variance:assets-liabilities-equity,accounts:list,journals});
 }
+
+type PublishedPost = {id:string;title:string;party:string;note:string;updated:string};
+const publishedPosts = "SELECT id,title,party,note,updated FROM records WHERE kind='posts' AND status='Published'";
+export const getPublishedPosts = () => many<PublishedPost>(publishedPosts+' ORDER BY updated DESC LIMIT 24');
+export const getPublishedPost = (postId:string) => one<PublishedPost>(publishedPosts+' AND id=?',postId);
 
 const interests=['updates','careers','volunteering','feedback'] as const;
 export async function dispatch(request:Request,path:string[]) {
@@ -252,7 +271,7 @@ export async function dispatch(request:Request,path:string[]) {
     const [area,key,recordId]=path;
     const user=await getChatGPTUser();
     if (get&&area==='public'&&path.length===1) {
-      const [pref,posts]=await Promise.all([settings(),many(`SELECT id,title,party,note,updated FROM records WHERE kind='posts' AND status='Published' ORDER BY updated DESC LIMIT 24`)]);
+      const [pref,posts]=await Promise.all([settings(),getPublishedPosts()]);
       return response({settings:pref,posts,user:!!user});
     }
     ensure(user,401,'Sign in with ChatGPT to continue.');
@@ -286,11 +305,22 @@ export async function dispatch(request:Request,path:string[]) {
     ensure(role,403,'This account has no Thoko staff access. Contact the restaurant administrator.');
     if (!key && get) return response({role,name:user.displayName,email:user.email});
     if (key==='summary'&&get) {
-      const clauses=taskFull(role)?[]:[user.email.toLowerCase()];
+      const clauses=seesAllTasks(role)?[]:[user.email.toLowerCase()];
       const tasks=await many(`SELECT status,COUNT(*) AS count FROM records WHERE kind='tasks'${clauses.length?' AND party=?':''} GROUP BY status`,...clauses);
       const orders=permits(role,'ordersRead')||role==='board'?await many('SELECT status,COUNT(*) AS count FROM orders GROUP BY status'):[];
+      const due=await one<{overdue:number;today:number}>(`SELECT
+        COALESCE(SUM(CASE WHEN due<>'' AND due<? THEN 1 ELSE 0 END),0) AS overdue,
+        COALESCE(SUM(CASE WHEN due=? THEN 1 ELSE 0 END),0) AS today
+        FROM records WHERE kind='tasks' AND status<>'Done'${clauses.length?' AND party=?':''}`,malawiDate(),malawiDate(),...clauses);
       const risks=canRegister(role,'risks')?await many(`SELECT id,title,status,likelihood*impact AS score FROM records WHERE kind='risks' AND status IN ('Open','Monitoring') ORDER BY score DESC LIMIT 5`):[];
-      return response({tasks,orders,risks});
+      return response({tasks,due,orders,risks});
+    }
+    if (key==='team'&&get) {
+      ensure(seesTeam(role),403,'Team directory access is required.');
+      const staff=await many<{email:string;role:Role;created:string}>("SELECT email,role,created FROM staff WHERE active=1 ORDER BY email LIMIT 200");
+      const owner=env.THOKO_OWNER_EMAIL?.trim().toLowerCase();
+      if (owner&&!staff.some(member=>member.email===owner)) staff.unshift({email:owner,role:'founder',created:''});
+      return response({staff});
     }
     if (key==='orders') {
       ensure(permits(role,'ordersRead'),403,'Order queue access is required.');
@@ -308,14 +338,20 @@ export async function dispatch(request:Request,path:string[]) {
       const kind=recordId;
       ensure(canRegister(role,kind),403,'This register is outside your role.');
       if (get) {
-        const onlyAssigned=kind==='tasks'&&!taskFull(role)&&role!=='board';
+        const month=new URL(request.url).searchParams.get('month');
+        if (kind==='budgets'&&month) {
+          const first=calendarDate.safeParse(month+'-01');
+          ensure(first.success,400,'Choose a valid budget month.');
+          return response({rows:await many("SELECT * FROM records WHERE kind='budgets' AND due=? ORDER BY party",first.data)});
+        }
+        const onlyAssigned=(kind==='tasks'&&!seesAllTasks(role))||(kind==='shifts'&&!managesWork(role));
         return response({rows:await many('SELECT * FROM records WHERE kind=?'+(onlyAssigned?' AND party=?':'')+
           " ORDER BY CASE WHEN due='' THEN 1 ELSE 0 END,due,updated DESC LIMIT 180",kind,...(onlyAssigned?[user.email.toLowerCase()]:[]))});
       }
       if (kind==='tasks'&&path[3]&&path[4]==='status') {
         const value=await input(request,z.object({status:z.enum(['Open','In progress','Done']),revision:z.number().int().positive()}));
         const existing=await one<RecordRow>("SELECT id,kind,party,status,revision FROM records WHERE kind='tasks' AND id=?",path[3]);
-        ensure(existing&&(taskFull(role)||existing.party===user.email.toLowerCase()),403,'You can change tasks assigned to your account.');
+        ensure(existing&&(managesWork(role)||existing.party===user.email.toLowerCase()),403,'You can change tasks assigned to your account.');
         await write(user,statement('UPDATE records SET status=?,updated=?,revision=revision+1 WHERE id=? AND kind=? AND revision=?',
           value.status,now(),path[3],kind,value.revision),'task.status',path[3],value.status);
         return response({ok:true});
