@@ -34,6 +34,9 @@ export function OrderApp() {
   }
   useEffect(()=>{
     try {setBasket(parseBasket(localStorage.getItem('thoko-basket-v1')));} catch {/* discard invalid local basket */}
+    const itemId=new URLSearchParams(window.location.search).get('item');
+    const requestedItem=menu.find(item=>item.id===itemId);
+    if(requestedItem){setSelected(requestedItem);setFilter(requestedItem.category);}
     setReady(true);
     api<PublicData>('public').then(data=>{setPublic(data);if(data.user) return refreshOrders();}).catch(e=>setError(asMessage(e)));
   },[]);
@@ -86,7 +89,7 @@ export function OrderApp() {
     finally{setBusy(false);}
   }
   return <main className="wrap order-page">
-    <div className="page-heading"><p className="kicker"><span/> THOKO RESTAURANT</p><h1>Order food</h1><p>Choose a meal, add your extras and tell us how you want it.</p></div>
+    <div className="page-heading commercial-order-heading"><div><p className="kicker">The Thoko menu</p><h1>FIND YOUR<br/>FAVOURITE.</h1><p>Choose your meal. Add your extras. Make it yours.</p></div><a className="button button-primary" href={'tel:'+tel}>Call to order</a></div>
     {error&&<p role="alert" className="message error">{error}</p>}
     {notice&&<p role="status" className="message success">{notice}</p>}
     <div className="order-layout">

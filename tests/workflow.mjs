@@ -62,7 +62,7 @@ try{
   await setStaff('board','board');
   await setStaff('officer','officer');
 
-  await page('/',{contains:'Close to home.'});
+  await page('/',{contains:'BIG FLAVOUR.'});
   await page('/about',{contains:'Dorothy Chakhala'});
   await page('/portal/ledger',{contains:'Staff sign-in',excludes:'Financial statements',privatePage:true});
   await page('/portal/ledger',{who:'buyer',contains:'Staff access required',excludes:'Financial statements',privatePage:true});

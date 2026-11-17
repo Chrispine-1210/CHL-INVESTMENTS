@@ -1,11 +1,11 @@
 import { ArrowUpRight, MapPin } from 'lucide-react';
 import { location, phone, tel } from '@/lib/thoko';
 
-const navigation=[['home','/','Home'],['order','/order','Menu'],['about','/about','Our story'],['journal','/journal','Journal'],['community','/community','Community']];
+const navigation=[['order','/order','Our menu'],['visit','/#visit','Find us'],['about','/about','Our story'],['community','/community','Community']];
 
 export function Header({page='home'}:{page?:string}) {
   return <header className="topbar">
-    <div className="location-bar"><div className="wrap row between"><span><MapPin size={13} aria-hidden="true"/> Kanengo, Lilongwe</span><a href={'tel:'+tel}>{phone}</a></div></div>
+    <div className="location-bar"><div className="wrap row between"><span><MapPin size={13} aria-hidden="true"/> Kanengo, Lilongwe <span className="location-services">Dine in & takeaway</span></span><a href={'tel:'+tel}>Call to order <span>{phone}</span></a></div></div>
     <div className="wrap topinner">
       <a className="brand" href="/" aria-label="Thoko home"><img src="/media/logo.webp" alt="" width="44" height="54"/><span>Thoko<small>RESTAURANT & TAKEAWAY</small></span></a>
       <nav aria-label="Main navigation">{navigation.map(([key,path,label])=><a key={key} aria-current={page===key?'page':undefined} href={path}>{label}</a>)}</nav>
