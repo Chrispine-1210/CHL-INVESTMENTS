@@ -1,0 +1,5 @@
+{
+  "name":"Thoko Restaurant & Takeaway","short_name":"Thoko","start_url":"/order","scope":"/",
+  "display":"standalone","theme_color":"#f8f2e8","background_color":"#f8f2e8",
+  "icons":[{"src":"/media/icon.png","sizes":"192x192","type":"image/png"}]
+}
